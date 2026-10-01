@@ -1,4 +1,4 @@
-// Command socket-backoff 跑重连退避样例。
+// Command socket-backoff 跑重连调度样例。
 package main
 
 import (
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"example.com/backoff"
 )
@@ -15,43 +14,48 @@ import (
 func Run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("socket-backoff", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	sample := flags.String("sample", "growth", "growth / cap / reset / work")
+	sample := flags.String("sample", "retry-after", "retry-after / budget / cap / reset")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	switch *sample {
-	case "growth":
+	if *sample == "retry-after" {
 		scheduler := backoff.NewScheduler()
-		values := make([]string, 0, 4)
-		for index := 0; index < 4; index++ {
-			values = append(values, fmt.Sprint(scheduler.Next("c1")))
+		delay, _ := scheduler.Next("c1", 0, 60000)
+		fmt.Fprintf(stdout, "delay=%d\n", delay)
+		return 0
+	}
+	if *sample == "budget" {
+		scheduler := backoff.NewScheduler()
+		allowed := 0
+		for index := 0; index < 200; index++ {
+			if _, ok := scheduler.Next(fmt.Sprintf("c-%d", index), 0, 0); ok {
+				allowed++
+			}
 		}
-		fmt.Fprintf(stdout, "delays=%s\n", strings.Join(values, ","))
-	case "cap":
+		fmt.Fprintf(stdout, "allowed=%d\n", allowed)
+		return 0
+	}
+	if *sample == "cap" {
 		scheduler := backoff.NewScheduler()
-		last := 0
+		last := int64(0)
 		for index := 0; index < 20; index++ {
-			last = scheduler.Next("c1")
+			last, _ = scheduler.Next("c1", int64(index)*1000, 0)
 		}
 		fmt.Fprintf(stdout, "delay=%d\n", last)
-	case "reset":
-		scheduler := backoff.NewScheduler()
-		scheduler.Next("c1")
-		scheduler.Next("c1")
-		scheduler.Next("c1")
-		scheduler.Success("c1")
-		fmt.Fprintf(stdout, "delay=%d\n", scheduler.Next("c1"))
-	case "work":
-		scheduler := backoff.NewScheduler()
-		for index := 0; index < 1000; index++ {
-			scheduler.Next("c1")
-		}
-		fmt.Fprintf(stdout, "work=%d\n", scheduler.Work())
-	default:
-		fmt.Fprintln(stderr, "需要 --sample growth|cap|reset|work")
-		return 2
+		return 0
 	}
-	return 0
+	if *sample == "reset" {
+		scheduler := backoff.NewScheduler()
+		scheduler.Next("c1", 0, 0)
+		scheduler.Next("c1", 1000, 0)
+		scheduler.Next("c1", 2000, 0)
+		scheduler.Success("c1")
+		delay, _ := scheduler.Next("c1", 100000, 0)
+		fmt.Fprintf(stdout, "in_range=%v\n", delay >= 375 && delay <= 625)
+		return 0
+	}
+	fmt.Fprintln(stderr, "需要 --sample retry-after|budget|cap|reset")
+	return 2
 }
 
 func main() {
